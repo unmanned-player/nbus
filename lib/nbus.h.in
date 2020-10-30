@@ -1,0 +1,341 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+#ifndef NBUS__H
+#define NBUS__H
+
+#cmakedefine NBUS_PREFIX_IS_PATH
+
+#include <stddef.h>
+#include <stdbool.h>
+#include <stdint.h>
+
+#include <limits.h>
+
+/**
+ * \brief System-wide unique prefix for nBus contexts.
+ *
+ * A unique prefix for all contexts. If the prefix starts with a `/` then it is assumed to be a valid absolute path
+ * prefix. The directory must exist before the first context is created. If the prefix does not start with a `/`, then
+ * it is considered an abstract path.
+ *
+ * Note, if using a path prefix, make sure that the directory is exclusive to nBus contexts only. If any other file or
+ * domain socket is made, things will get nasty!
+ *
+ * The default is `nbus:` (abstract path).
+**/
+#define NBUS_CTX_NAME_PREFIX            "@NBUS_CTX_NAME_PREFIX@"
+
+/**
+ * \def NBUS_CTX_NAME_LEN
+ * \brief Maximum allowed characters in the name of context.
+ *
+ * \details This value is calculated during build.
+**/
+#define NBUS_CTX_ID_LEN                 @__nbus_ctx_name_len@
+
+/**
+ * \brief Length of method or event names in nBus.
+ *
+ * Names of contexts or method or event must be no longer than this size.
+**/
+#define NBUS_NAME_LEN                   32
+
+/**
+ * \breif Any type of protocol.
+**/
+#define NBUS_PROTO_ANY                  ((uintptr_t)0x0000)
+
+/**
+ * \brief RPC/Event is raw C structures or byte blobs which may or may not be serialised.
+**/
+#define NBUS_PROTO_RAW                  ((uintptr_t)0x0001)
+
+/**
+ * \brief RPC/Event is serialised as CBOR.
+ *
+ * \note    This is a marker flag only. Message encoding/decoding is caller/callee's responsibility.
+**/
+#define NBUS_PROTO_CBOR                 ((uintptr_t)0x0002)
+
+/**
+ * \brief RPC/Event is encoded as JSON.
+ *
+ * \note    This is a marker flag only. Message encoding/decoding is caller/callee's responsibility.
+**/
+#define NBUS_PROTO_JSON                 ((uintptr_t)0x0004)
+
+/**
+ * \brief Any user-defined protocol begins after this point.
+**/
+#define NBUS_PROTO_USER_START           ((uintptr_t)0x0010)
+
+/**
+ * \brief Registration flag to represent that that call-back is for a method.
+**/
+#define NBUS_KIND_METHOD                ((uintptr_t)0x1000)
+
+/**
+ * \brief Registration flag to represent that that call-back is for event handler.
+**/
+#define NBUS_KIND_EVENT                 ((uintptr_t)0x2000)
+
+/**
+ * \brief Define a registration item for a method.
+ *
+ * \param _p    Protocol this method recognises.
+ * \param _n    The function call-back to register. The public name of this function will also be the same as the method
+ *              name.
+**/
+#define NBUS_DEF_METHOD(_p, _n)         { .flags = (NBUS_KIND_METHOD | _p), .name = #_n,   .cb = _n }
+
+/**
+ * \brief Define a registration item for a method.
+ *
+ * \param _p    Protocol this method recognises.
+ * \param _n    Public name of the function.
+ * \param _cb   The call-back function for this method.
+**/
+#define NBUS_DEF_METHOD_EX(_p, _n, _cb) { .flags = (NBUS_KIND_METHOD | _p), .name = _n,   .cb = _cb  }
+
+/**
+ * \brief Define a registration item for an event handler.
+ *
+ * \param _p    Protocol this method recognises.
+ * \param _n    Either the full event name or a wild-card acceptable by `fmatch()` function.
+ * \param _cb   The call-back function to register.
+**/
+#define NBUS_DEF_EVENT(_p, _n, _cb)     { .flags = (NBUS_KIND_EVENT  | _p), .name = _n,   .cb = _cb  }
+
+/**
+ * \brief End of RPC/event registrations.
+**/
+#define NBUS_DEF_END()                  { .flags = 0,                       .name = "\0", .cb = NULL }
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**
+ * \brief nBus context object.
+ *
+ * While everything needed to perform any I/O is contained in this object, it is not thread safe per-se. The same
+ * context cannot be used in 2 threads without any locking mechanism.
+**/
+typedef struct nbus_context_s nbus_context_t;
+
+/**
+ * \brief           Call back type to handle incoming method calls or events.
+ *
+ * \details         This call-back is used for registering either a RPC call-back or an event handler. In either case,
+ *                  `ctx` is the local context on which this call-back was invoked. The protocol in `proto` is merely a
+ *                  suggestion as to how the remote context raised/invoked. The `peer` contains name of the remote
+ *                  context's ID and `name` field contains the method/event name.
+ *
+ *                  If this is a method's call-back, then use `::nbus_set_output()` to fill the response data. As an
+ *                  event handler, return code is irrelevant as nothing is sent back to the caller.
+ *
+ * \param ctx       Context on which the method call-back is registered.
+ * \param proto     One of `NBUS_PROTO_*` IDs or some user defined protocol.
+ * \param peer      The peer that invoked this method or raised this event.
+ * \param name      Name of the method or event.
+ * \param data      Either the argument(s) for the method or event's data.
+ * \param n         Size of data.
+ *
+ * \retval 0        This call-back did whatever it had to do successfully.
+ * \retval non-zero The call-back failed.
+**/
+typedef int (*nbus_cb_t)(nbus_context_t *ctx, uint8_t proto, const char *peer, const char *name, const void *data, size_t n);
+
+/**
+ * \brief           Reply handler call-back for method invocations.
+ *
+ * \param proto     The protocol of reply.
+ * \param rc        The return code from remote method.
+ * \param extra     Any extra data passed during invoke.
+ * \param data      Optional response data from remote method.
+ * \param n         Size of response data.
+**/
+typedef void (nbus_reply_handler_t)(uint8_t proto, int rc, void *extra, const void *data, size_t n);
+
+/**
+ * \brief           Call-back registration for RPC methods and event handlers.
+ *
+ * \details         An array of this structure is usually passed as an argument to `::nbus_init` function. Each instance
+ *                  of this structure represents an RPC method call-back or an event handler call-back. In case of event
+ *                  handler, the field `name` can be used to store wild-card. When using this in C99 mode,
+**/
+typedef struct {
+    uintptr_t flags;    /*!< Call-back protocols and flags */
+    const char name[NBUS_NAME_LEN];   /*!< Name of the function or wild-card for event handler */
+    nbus_cb_t cb;       /*!< Call-back function */
+} nbus_cb_reg_t;
+
+/**
+ * \brief           Initialise an nBus context.
+ *
+ * \details         Initialise an nBus context either on heap or over a fixed memory region. On successful return,
+ *                  `r_ctx` will point to the initialised context and on failure if `r_ctx` did point to a valid memory
+ *                  location, it will be set to `NULL`. The `name` must be unique such that a file by that name can be
+ *                  created in the directory assuming `::NBUS_CTX_NAME_PREFIX` is a path prefix. The array of call-back
+ *                  registration in `regs` is optional but usually needed and it must be terminated with `NBUS_DEF_END`
+ *                  macro.
+ *
+ *                  In case this function is called with a pre-allocated buffer, `buf` must point to a valid region in
+ *                  memory and `buf_len` must point to a `size_t` variable containing the length of `buf`. Usually, the
+ *                  buffer is a bit more than twice the size of the largest message this context is expected to handle.
+ *                  Calculating this may be difficult. To ensure you have accurate size, set `buf_len` to the largest
+ *                  message size this context will handle and call this function as:
+ *
+ *                  ```c
+ *                  size_t buf_len = 1024;
+ *
+ *                  err = nbus_init(NULL, NULL, NULL, NULL, NULL, &buf_len);
+ *                  ```
+ *                  This function will fail setting `err` to EINVAL, but `buf_len` will not be set to the correct size.
+ *
+ *                  In dynamic allocation mode, the internal ingress/egress buffers are automatically reallocated as
+ *                  needed and most functions will fail when there's no memory left to allocate (`ENOMEM`). But in fixed
+ *                  buffer mode, if any function ends up handling message larger than preallocated size, then it will
+ *                  fail with `ENOBUFS` instead.
+ *
+ * \param[in,out] r_ctx
+ *                  The context to create. On success, this points to a valid context.
+ * \param name      A unique name for this context within the entire system it's running on.
+ * \param regs      An optional NULL terminated array of function/event handlers. In C99, use macros
+ *                  `NBUS_DEF_*` to build the said array.
+ * \param buf       The buffer region in which the context and the internal buffers will be initialised.
+ * \param[in,out] buf_len
+ *                  Pointer to size of the buffer region.
+ *
+ * \retval 0        Success.
+ * \retval EINVAL   If any of the arguments were NULL, or `name` is a reserved name or if `name` is larger than
+ *                  `NBUS_CTX_ID_LEN` or if function/event handlers' names are larger than `NBUS_NAME_LEN`.
+ * \retval ENOBUFS  If the given memory is too small to fit the context and the buffers. See calculations above
+ *                  for an idea of how much is required.
+ * \retval errno    When an error occurs initialising the listener socket.
+**/
+int nbus_init(nbus_context_t **r_ctx, const char *name, const nbus_cb_reg_t *regs, void *buf, size_t *buf_len);
+
+/**
+ * \brief           Terminate and release the context.
+
+ * \details         Destroys the context by closing the backing domain socket and frees any memory allocated for
+ *                  buffers.
+ *
+ * \param ctx       The context to destroy.
+ *
+ * \retval  0       Context successfully destroyed.
+ * \retval EINVAL   If any argument was NULL or invalid.
+**/
+int nbus_exit(nbus_context_t *ctx);
+
+/**
+ * \brief           Handle incoming data on this context.
+ *
+ * \details         This function handles incoming messages to the context. Usually, after the context is initialised,
+ *                  it's internal socket FD is registered with `select()`/`poll()` functions for read events by using
+ *                  `::nbus_get_fd()` function to get the underlying FD. This function is then called whenever a read
+ *                  event occurs on that socket FD.
+ *
+ * \param ctx       The context on which incoming messages are handled.
+ *
+ * \retval  0       Success.
+ * \retval  EINVAL  If context is NULL or invalid.
+**/
+int nbus_handle(nbus_context_t *ctx);
+
+/**
+ * \brief           Get the context's underlying domain socket file descriptor.
+ *
+ * \param ctx       The context's internal file descriptor.
+ *
+ * \retval          The file descriptor or -1 if context is invalid.
+**/
+int nbus_get_fd(nbus_context_t *ctx);
+
+/**
+ * \brief           Set response data during a method call-back.
+ *
+ * \details         Call this function to set response data from inside a method call-back. A copy of the `data` is
+ *                  stored in the context's internal buffer before being sent out. In case, of string based
+ *                  serialisation of data, make sure to also pass the extra `'\0'` terminator, for example in JSON
+ *                  objects.
+ *
+ * \param ctx       The context in which response data is stored.
+ * \param data      The response data to store.
+ * \param n         Size of response data. Must also include the terminating `'\0'` in case of JSON objects.
+ *
+ * \retval  0       Response data was successfully buffered in the context.
+ * \retval  ENOBUFS When context is fixed and the response data is larger than the context's egress buffer size.
+ * \retval  ENOMEM  If no extra memory for egress buffer could be allocated.
+**/
+int nbus_set_output(nbus_context_t *ctx, const void *data, size_t n);
+
+/**
+ * \brief Invoke a remote method.
+ *
+ * \param ctx       The local context used for invoking remote method.
+ * \param timeout   Optional time out in milliseconds. If set to 0, no time limit is set.
+ * \param proto     The protocol used for serialising/de-serialising requests and responses.
+ * \param dst       The remote context's ID.
+ * \param method    The remote method name.
+ * \param arg       Optional arguments to be passed to the remote function.
+ * \param arg_len   Size of the arguments. Must be provided if `arg` is non NULL.
+ * \param cb        An optional call-back to handle reply for method.
+ * \param extra     Any extra argument to pass to the previous call-back.
+ *
+ * \retval  0       Call was successful.
+ * \retval  EINVAL  If arguments were invalid.
+ * \retval  ENOBUFS If the response was too large to be held in the local context. Could happen if the local
+ *                  context is based off a fixed buffer.
+ * \retval  ENOMEM  Ran out of memory allocating data for response.
+ * \retval  ENOMSG  If there's no remote method by this name or if the remote method was registered with a
+ *                  different protocol (JSON/CBOR).
+ * \retval  errno   Various socket I/O errors.
+**/
+int nbus_invoke(
+    nbus_context_t *ctx,
+    uint64_t timeout,
+    uint8_t proto,
+    const char *dst,
+    const char *method,
+    const void *arg,
+    size_t arg_len,
+    nbus_reply_handler_t cb,
+    void *extra
+);
+
+/**
+ * \brief Raise an event.
+ *
+ * Raise an event on one or more remote contexts. The destination argument in `dst_wc` can also take wild cards that
+ * can be understood by POSIX [`fnmatch()`](https://www.mankier.com/3/fnmatch) function.
+ *
+ * \param ctx       Context using which the event will be raised.
+ * \param proto     The protocol used by this event.
+ * \param dst_wc    Optional. Either a single exact destination or wild-card. If set to `NULL` it is equivalent of
+ *                  setting this argument with `*`.
+ * \param name      Name of this event.
+ * \param data      Optional event specific data.
+ * \param n         Size of the data. Must be specified if `data` is non-NULL.
+ *
+ * \retval 0        Success.
+ * \retval EINVAL   If arguments were invalid.
+ * \retval ENOBUFS  If the response was too large to be held in the local context when it was created with a fixed
+ *                  buffer.
+ * \retval ENOMEM   Ran out of memory allocating for `data`.
+ * \retval errno    Various socket I/O errors.
+**/
+int nbus_raise_event(
+    nbus_context_t *ctx,
+    uint8_t proto,
+    const char *dst_wc,
+    const char *name,
+    const void *data,
+    size_t n
+);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* NBUS__H */
