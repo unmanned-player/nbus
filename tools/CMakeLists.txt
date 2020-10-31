@@ -17,3 +17,9 @@ endif()
 if (NB_HAS_CBOR)
     target_link_libraries(nbuscli tinycbor)
 endif()
+
+install(
+    TARGETS     nbuscli
+    RUNTIME
+    DESTINATION usr/bin
+)

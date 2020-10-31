@@ -122,15 +122,53 @@ By default, the build will generate library only. To build examples or documents
 enable those switches. The build settings are similar to the ones
 [Buildroot](https://buildroot.org/downloads/manual/manual.html#_infrastructure_for_cmake_based_packages) uses.
 
-| Variable             | Type    | Default                      | Description                           |
-| -------------------- | --------| ---------------------------- | ------------------------------------- |
-| BUILD_CLI            | Boolean | `OFF`                        | Build command-line diagnostic utility |
-| BUILD_AGENT          | Boolean | `OFF`                        | Build network agent. Coming soon      |
-| BUILD_DOCS           | Boolean | `OFF`                        | Build API docs and manual pages       |
-| BUILD_EXAMPLES       | Boolean | `OFF`                        | Build examples                        |
-| BUILD_TESTS          | Boolean | `OFF`                        | Build speed-tests                     |
-| ENABLE_LUA           | Boolean | `OFF`                        | Build Lua bindings. Coming soon       |
-| NBUS_CTX_NAME_PREFIX | String  | `nbus:`  or `/var/run/nbus/` | See details below                     |
+| Variable               | Type    | Default                      | Description                           |
+| ---------------------- | ------- | ---------------------------- | ------------------------------------- |
+| `BUILD_AGENT`          | Boolean | `OFF`                        | Build forwarding agent. Coming soon   |
+| `BUILD_CLI`            | Boolean | `OFF`                        | Build command-line diagnostic utility |
+| `BUILD_DOCS`           | Boolean | `OFF`                        | Build API docs and manual pages       |
+| `BUILD_EXAMPLES`       | Boolean | `OFF`                        | Build examples                        |
+| `BUILD_TESTS`          | Boolean | `OFF`                        | Build speed-tests                     |
+| `ENABLE_LUA`           | Boolean | `OFF`                        | Build Lua bindings. Coming soon       |
+| `NBUS_CTX_NAME_PREFIX` | String  | `nbus:`  or `/var/run/nbus/` | See details below                     |
+
+### `BUILD_AGENT`
+
+Also, build and install network forwarding agent (`nbusnfd`) along with library.
+
+Note: Coming Soon.
+
+Network forwarding agent, that uses HTTP(s) protocol to allow external devices to invoke methods on the local device or
+raise/listen to events in device.
+
+### `BUILD_CLI`
+
+Also build and install nBus diagnostic utility (`nbuscli`) along with the library.
+
+During compilation, if JSON-C and/or TinyCBOR was found in path, the compilation process will link `nbuscli` against
+these libraries to enrich event listening. However, `libnbus.a`/`libnbus.so` itself will depends only on standard
+C-99/POSIX APIs.
+
+A more detailed list of features are documented in its own [manual](docs/nbuscli.md).
+
+### `BUILD_DOCS`
+
+Needs `doxygen` to generate API docs.
+
+### `BUILD_EXAMPLES`
+
+Builds simple examples that showcase capabilities of nBus.
+
+### `BUILD_TESTS`
+
+Generates speed tests. This requires UBus to be also present in the `CMAKE_{INSTALL|STAGING}_PREFIX`. It generates a
+sample test that compares nBus vs UBus and prints the number of messages per second each can execute.
+
+### `ENABLE_LUA`
+
+Note: Coming Soon.
+
+Generate Lua bindings.
 
 ### `NBUS_CTX_NAME_PREFIX`
 
@@ -150,45 +188,6 @@ If `NBUS_CTX_NAME_PREFIX` is not specified during build,
 * Path prefix defaults to `/var/run/nbus/`
 * On Linux, it defaults to abstract prefix and is set to `nbus:`.
 
-### BUILD_CLI
-
-During compilation, if JSON-C and/or TinyCBOR was found in path, the compilation process will link `nbuscli` to link
-against these libraries to enrich event listening. However, `libnbus.a`/`libnbus.so` itself will be independent and
-depends only on standard C/POSIX APIs.
-
-## Diagnostic utility
-
-nBus comes with a command-line diagnostic utility called, `nbuscli`. It can be used to listen for events, raise events
-or invoke remote methods. If JSON-C or TinyCBOR library is available, `nbuscli` can also listen for serialised events
-on these formats too.
-
-For example (as seen on Raspberry Pi):
-
-```
-    # nbuscli --list-peers '*'
-        generator
-
-    # nbuscli --listen '*'
-    > [R] nbus:generator@hello_raw
-      0000  57 6f 72 6c 64 21                                World!
-
-    > [J] nbus:generator@hello_json
-    {
-      "data": "World!"
-    }
-
-    > [C] nbus:generator@hello_cbor
-    "World!"
-```
-
-A more detailed list of commands and features are documented in [manual](docs/nbuscli.md).
-
-## Agent
-
-Coming soon.
-
-An agent is a daemon that uses HTTP(S) protocol to forward RPCs and events in/out of device.
-
 ## Security
 
 nBus works over Unix domain sockets which means data can be only within the device where it's running on. IoT devices
@@ -198,3 +197,8 @@ possible. For this reason, there's no special security mechanisms implemented fo
 Using path based prefix can provide some access control if that is so desired. In that create sub-directories under path
 prefix with various users and groups. In the application, set umask() and set effective UID/GID appropriately and create
 context. Use diagnostic utility as `root` user to be able to see all contexts.
+
+## Development/Contributions
+
+nBus is developed and released from [GitLabs](https://gitlab.com/unmdplyr/nbus). Please send in feature-requests,
+faults, patches, swearing, blaming and beating there.

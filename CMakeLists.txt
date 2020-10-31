@@ -105,9 +105,6 @@ if (NOT NBUS_CTX_NAME_PREFIX)
     endif()
 endif()
 
-set(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} -L${CMAKE_STAGING_PREFIX}/lib -L${CMAKE_STAGING_PREFIX}/lib64")
-set(CMAKE_C_FLAGS           "${CMAKE_C_FLAGS} -isystem ${CMAKE_STAGING_PREFIX}/include")
-
 # According to POSIX, UNIX_PATH_MAX is removed and the sizeof (struct sockaddr_un.sun_path) is intentionally left
 # undefined. So we need to get the size of it in a portable way.
 set(CMAKE_EXTRA_INCLUDE_FILES "sys/socket.h" "sys/un.h")
