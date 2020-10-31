@@ -43,6 +43,8 @@
 #define NB__IS_RESERVED_ID(name) \
     ((strcmp(name, NBUS_ID_AGENT) == 0) || (strcmp(name, NBUS_ID_CLI) == 0))
 
+#define NB_PROTO_ID(flags)              ((uint8_t)(flags & 0xfful))
+
 #ifdef __cplusplus
 extern "C" {
 #endif

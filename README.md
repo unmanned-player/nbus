@@ -88,20 +88,24 @@ Whenever a READ even occurs on that file descriptor, call `nbus_handle()` to han
 
 If you wish to invoke a remote call on this context, from another context do:
 ```c
-    char *res = NULL;
-    size_t res_len = 0;
-    int rc = 0;
+    static void hello_reply(uint8_t proto, int rc, void *extra, const void *data, size_t n)
+    {
+        /* blah blah -- handle your response */
+    }
 
-    err = nbus_invoke(ctx, 0, NBUS_PROTO_RAW, "server", "say_hello", "some data", 9, &rc, (void ** const)&res, &res_len);
+    err = nbus_invoke(ctx, 0, NBUS_PROTO_RAW, "server", "say_hello", "some data", 9, hello_reply, NULL /* extra */);
 ```
-At this point, `res` will contain the response to the remote method and `res_len` will tell the size of the response
+At this point, `data` will contain the response to the remote method and `n` will tell the size of the response
 data. Note, `rc` is the return code from the method's call-back on the remote side. In our example, we were
-unconditionally returning `0` above, so `rc` will always be 0.
+unconditionally returning `0` above, so `rc` will always be 0. If the reply call-back isn't given, then the remote
+invocation becomes a call-only invoke. It reduces further socket I/O as there's no need for response.
 
 Do not forget to destroy the context when done.
 ```c
     nbus_exit(ctx);
 ```
+
+These APIs are designed keeping a future asynchronous mode nBus in mind.
 
 ## Building
 
@@ -146,6 +150,12 @@ If `NBUS_CTX_NAME_PREFIX` is not specified during build,
 * Path prefix defaults to `/var/run/nbus/`
 * On Linux, it defaults to abstract prefix and is set to `nbus:`.
 
+### BUILD_CLI
+
+During compilation, if JSON-C and/or TinyCBOR was found in path, the compilation process will link `nbuscli` to link
+against these libraries to enrich event listening. However, `libnbus.a`/`libnbus.so` itself will be independent and
+depends only on standard C/POSIX APIs.
+
 ## Diagnostic utility
 
 nBus comes with a command-line diagnostic utility called, `nbuscli`. It can be used to listen for events, raise events
@@ -171,7 +181,7 @@ For example (as seen on Raspberry Pi):
     "World!"
 ```
 
-Note, the diagnostic utility is still under development. More features will be added in coming releases.
+A more detailed list of commands and features are documented in [manual](docs/nbuscli.md).
 
 ## Agent
 

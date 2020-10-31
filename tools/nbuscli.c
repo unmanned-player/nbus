@@ -34,8 +34,68 @@
 #define ANSI_CYAN                       "\x1B[36m"
 #define ANSI_WHITE                      "\x1B[37m"
 
-#define HDR_FMT_ANSI                    "\n" ANSI_CYAN "> " ANSI_MAGENTA "[%c] " ANSI_GREEN NBUS_CTX_NAME_PREFIX ANSI_NORMAL "%s" ANSI_YELLOW "@" ANSI_NORMAL "%s (%zu)\n"
-#define HDR_FMT_RAW                     "\n> [%c] " NBUS_CTX_NAME_PREFIX "%s@%s (%zu)\n"
+#define HDR_FMT_ANSI                    "\n" ANSI_CYAN "> " ANSI_MAGENTA "[%s] " ANSI_GREEN NBUS_CTX_NAME_PREFIX ANSI_NORMAL "%s" ANSI_YELLOW "@" ANSI_NORMAL "%s (%zu)\n"
+#define HDR_FMT_RAW                     "\n> [%s] " NBUS_CTX_NAME_PREFIX "%s@%s (%zu)\n"
+
+#define ARG_EVENT                       { "event",      required_argument,  NULL, 'e' }
+#define ARG_HELP                        { "help",       no_argument,        NULL, 'h' }
+#define ARG_INPUT                       { "input",      required_argument,  NULL, 'i' }
+#define ARG_METHOD                      { "method",     required_argument,  NULL, 'm' }
+#define ARG_NO_ARGS                     { "no-args",    no_argument,        NULL, 'n' }
+#define ARG_PEER                        { "peer",       required_argument,  NULL, 'p' }
+#define ARG_PROTOCOL                    { "protocol",   required_argument,  NULL, 'P' }
+#define ARG_TIMEOUT                     { "timeout",    required_argument,  NULL, 't' }
+#define ARG_VERBOSE                     { "verbose",    no_argument,        NULL, 'v' }
+#define ARG_VERSION                     { "version",    no_argument,        NULL, 300 }
+#define ARG_WAIT                        { "wait-reply", no_argument,        NULL, 'w' }
+#define ARG_END                         { NULL,         0,                  NULL,  0  }
+
+#define SOPT_INVOKE                     "hi:m:np:P:t:w"
+#define SOPT_LIST                       "hv"
+#define SOPT_LISTEN                     "he:p:P:"
+#define SOPT_RAISE                      "hnP:e:i:t:"
+#define SOPT_MAIN                       "h"
+
+static struct option opts_main[] = {
+    ARG_HELP,
+    ARG_VERSION,
+    ARG_END
+};
+
+static struct option opts_invoke[] = {
+    ARG_HELP,
+    ARG_INPUT,
+    ARG_METHOD,
+    ARG_NO_ARGS,
+    ARG_PEER,
+    ARG_PROTOCOL,
+    ARG_TIMEOUT,
+    ARG_WAIT,
+    ARG_END
+};
+
+static struct option opts_list[] = {
+    ARG_HELP,
+    ARG_VERBOSE,
+    ARG_END
+};
+
+static struct option opts_listen[] = {
+    ARG_HELP,
+    ARG_EVENT,
+    ARG_PEER,
+    ARG_PROTOCOL,
+    ARG_END
+};
+
+static struct option opts_raise[] = {
+    ARG_EVENT,
+    ARG_HELP,
+    ARG_INPUT,
+    ARG_NO_ARGS,
+    ARG_PROTOCOL,
+    ARG_END
+};
 
 #define nb__accept_name(V, wc, is_peer)                                         \
     do {                                                                        \
@@ -48,123 +108,84 @@
         }                                                                       \
     } while (0)
 
-char *peer = NULL;
-char *method = NULL;
-char *event = NULL;
-uint8_t proto = NBUS_PROTO_ANY;
-unsigned counter = 0;
-unsigned verbose = 0;
-char *arg = NULL;
-size_t arg_len = 0;
-int no_arg = 0, need_reply = 0;
+static char *peer = NULL;
+static char *method = NULL;
+static char *event = NULL;
+static uint8_t proto = NBUS_PROTO_ANY;
+static unsigned counter = 0;
+static unsigned verbose = 0;
+static char *arg = NULL;
+static size_t arg_len = 0;
+static int no_arg = 0, need_reply = 0;
+static uint64_t timeout = 0;
+
+#ifdef NB__HAS_JSON
+static struct json_tokener *json_tok = NULL;
+#endif
 
 int is_stdout_tty = 0;
 
-F_INLINE char nb__proto_chr(uint8_t _p)
+F_INLINE const char *nb__proto_str(uint8_t _p)
 {
+    static char buf[4] = { 0, 0, 0, 0 };
+
     switch (_p) {
-        case NBUS_PROTO_RAW:    return 'R';
-        case NBUS_PROTO_CBOR:   return 'C';
-        case NBUS_PROTO_JSON:   return 'J';
-        default:                break;
+        case NBUS_PROTO_ANY:
+            buf[0] = ' '; buf[1] = '*';
+            break;
+        case NBUS_PROTO_RAW:
+            buf[0] = ' '; buf[1] = 'R';
+            break;
+        case NBUS_PROTO_CBOR:
+            buf[0] = ' '; buf[1] = 'C';
+            break;
+        case NBUS_PROTO_JSON:
+            buf[0] = ' '; buf[1] = 'J';
+            break;
+        default:
+            snprintf(buf, sizeof(buf), "%02x", _p);
+            break;
     }
-    return 'X';
+    return buf;
 }
 
-static void nb__main_help(void)
+static void nb__help(void)
 {
     printf(
         "nBus Diagnostic Utility v" PROG_VERSION "\n"
         "\n"
-        "Usage: nbuscli [command] [options]\n"
+        "Usage:\n"
+        "  nbuscli invoke [-w] -p <N> -m <N> [-P <P>] [-t <MS>] (-i <FILE> | -n)\n"
+        "  nbuscli list [-v]\n"
+        "  nbuscli listen -e <N|W> -p <N|W> [-P <P>]\n"
+        "  nbuscli raise -e <N> [-P <P>] [-t <MS>] (-i <FILE> | -n)\n"
         "\n"
-        "  -h, --help       This help message.\n"
-        "  -v, --verbose    Version string.\n"
+        "  -h, --help       This help message\n"
+        "      --version    Version string\n"
         "\n"
         "Commands:\n"
-        "  list             Show a list of peers.\n"
-        "  listen           Listen to events.\n"
-        "  invoke           Invoke a remote method.\n"
-        "  raise            Raise an event.\n"
+        "  invoke   Invoke a remote method\n"
+        "  list     Show live peers\n"
+        "  listen   Listen for public events\n"
+        "  raise    Raise an event\n"
         "\n"
-        "Use `-h` option in each of these sub-commands to get more details.\n"
+        "Options:\n"
+        "  -e, --event <N|W>    Event name or wild-card filter\n"
+        "  -i, --input <FILE>   Load arguments from file\n"
+        "  -m, --method <N>     Method name\n"
+        "  -n, --no-args        Do not expect arguments\n"
+        "  -p, --peer <N|W>     Peer name or wild-card filter\n"
+        "  -P, --protocol <P>   Select serialisation protocol\n"
+        "  -t, --timeout <MS>   Timeout in milliseconds\n"
+        "  -w, --wait-reply     Wait for reply after invocation\n"
+        "  -v, --verbose        Show more drama\n"
         "\n"
-        "Copyright (c) 2020 nBus\n"
-    );
-}
-
-static void nb__invoke_help(void)
-{
-    printf(
-        "nBus - RPC invoker\n"
+        "Where,\n"
+        "  <N>      A valid name\n"
+        "  <W>      wild-card filter\n"
+        "  <P>      Protocol code or one of 'raw', 'cbor', 'json'\n"
         "\n"
-        "Usage: nbuscli invoke [options]\n"
-        "\n"
-        "  -h, --help           This help message.\n"
-        "\n"
-        "  -p, --peer           Name of remote peer on which to invoke.\n"
-        "  -P, --protocol       Serialisation protocol to use.\n"
-        "  -m, --method         Name of remote method.\n"
-        "  -n, --no-args        Call remote function without arguments.\n"
-        "  -w, --wait-reply     Wait for reply.\n"
-        "  -i, --file <FILE>    Arguments to pass read from file.\n"
-        "\n"
-        "If `--no-args` is not given and `--file` is also not given, arguments\n"
-        "are taken from STDIN.\n"
-        "\n"
-        "Copyright (c) 2020 nBus\n"
-    );
-}
-
-static void nb__list_help(void)
-{
-    printf(
-        "nBus - Peer listing\n"
-        "\n"
-        "Usage: nbuscli list [-v]\n"
-        "\n"
-        "\n"
-        "  -h, --help       This help message.\n"
-        "\n"
-        "  -v, --verbose    Verbose listing of remote methods and event handlers.\n"
-        "\n"
-        "Copyright (c) 2020 nBus\n"
-    );
-}
-
-static void nb__listen_help(void)
-{
-    printf(
-        "nBus - Events listener\n"
-        "\n"
-        "Usage: nbuscli listen [-v] [-p peer] [-P protocol] [-e event]\n"
-        "\n"
-        "\n"
-        "  -h, --help       This help message.\n"
-        "\n"
-        "  -P, --protocol   Serialisation protocol to listen to.\n"
-        "  -p, --peer       Either a single peer or a wild-card.\n"
-        "  -e, --event      Specific event or a wild-card filter.\n"
-        "\n"
-        "Note, both `peer` and `event` default '*' if not specified.\n"
-    );
-}
-
-static void nb__raise_help(void)
-{
-    printf(
-        "nBus - Raise event on remote peers\n"
-        "\n"
-        "Usage: nbuscli raise [options]\n"
-        "\n"
-        "  -h, --help       This help message.\n"
-        "\n"
-        "  -P, --protocol   Serialisation protocol to use.\n"
-        "  -e, --event      Name of event.\n"
-        "  -n, --no-args    No contents/arguments to the event.\n"
-        "  -i, --file       Arguments/Contents of the event.\n"
-        "\n"
-        "Copyright (c) 2020 nBus\n"
+        "Copyright (c) 2020 nBus Unmanned Player\n"
     );
 }
 
@@ -246,8 +267,8 @@ static void nb__invoke(void)
     }
 
     r = (need_reply)
-        ? nbus_invoke(ctx, 0, NBUS_PROTO_RAW, peer, method, arg, arg_len, nb__reply_handler, NULL)
-        : nbus_invoke(ctx, 0, NBUS_PROTO_RAW, peer, method, arg, arg_len, NULL, NULL);
+        ? nbus_invoke(ctx, timeout, NBUS_PROTO_RAW, peer, method, arg, arg_len, nb__reply_handler, NULL)
+        : nbus_invoke(ctx, timeout, NBUS_PROTO_RAW, peer, method, arg, arg_len, NULL, NULL);
 
     nbus_exit(ctx);
 
@@ -263,16 +284,17 @@ static int nb__peer_printer(nbus_context_t *ctx, uint64_t ms, const char *_peer,
     nb__res_t mres;
 
     (void)r;
+    (void)ms;
     (void)q;
 
     printf("  %s\n", (_peer[0] == '/')? (_peer + sizeof(NBUS_CTX_NAME_PREFIX)): _peer);
-    if (verbose && nb_do_egress(ctx, ms, _peer, &mres, &meta) == 0) {
+    if (verbose && nb_do_egress(ctx, timeout, _peer, &mres, &meta) == 0) {
         size_t i, n_regs;
         nbus_cb_reg_t *reg;
 
         n_regs = mres.len / sizeof(nbus_cb_reg_t);
         for (i = 0, reg = (nbus_cb_reg_t *)ctx->ingress.data; i < n_regs; i++, reg++) {
-            char flags[] = ".. X";
+            char flags[] = "..";
 
             if ((reg->flags & NBUS_KIND_METHOD) != 0) {
                 flags[0] = 'M';
@@ -282,10 +304,10 @@ static int nb__peer_printer(nbus_context_t *ctx, uint64_t ms, const char *_peer,
             }
 
             if (is_stdout_tty) {
-                printf("    " ANSI_MAGENTA "[%s]" ANSI_NORMAL " %s\n", flags, reg->name);
+                printf("    " ANSI_MAGENTA "[%s %s]" ANSI_NORMAL " %s\n", flags, nb__proto_str(reg->flags), reg->name);
             }
             else {
-                printf("    [%s] %s\n", flags, reg->name);
+                printf("    [%s %s] %s\n", flags, nb__proto_str(reg->flags), reg->name);
             }
         }
     }
@@ -400,10 +422,10 @@ static int nb_show_anye(nbus_context_t *ctx, uint8_t _p, const char *_peer, cons
     f_mem = open_memstream(&bufr, &buf_n);
 
     if (is_stdout_tty) {
-        fprintf(f_mem, HDR_FMT_ANSI, nb__proto_chr(_p), _peer, _evt, n);
+        fprintf(f_mem, HDR_FMT_ANSI, nb__proto_str(_p), _peer, _evt, n);
     }
     else {
-        fprintf(f_mem, HDR_FMT_RAW, nb__proto_chr(_p), _peer, _evt, n);
+        fprintf(f_mem, HDR_FMT_RAW, nb__proto_str(_p), _peer, _evt, n);
     }
 
     if (_p == NBUS_PROTO_RAW) {
@@ -453,6 +475,10 @@ static void nb__listen(void)
     sigaddset(&mask, SIGTERM);
     sigaddset(&mask, SIGINT);
 
+#ifdef NB__HAS_JSON
+    json_tok = json_tokener_new();
+#endif
+
     if (sigprocmask(SIG_BLOCK, &mask, NULL) < 0) {
         fprintf(stderr, "sigprocmask: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
@@ -483,6 +509,9 @@ static void nb__listen(void)
 
     fprintf(stdout, "\nListened to %u events.\n", counter);
 
+#ifdef NB__HAS_JSON
+    json_tokener_free(json_tok);
+#endif
     nbus_exit(ctx);
 }
 
@@ -506,6 +535,21 @@ static void nb__raise(void)
     }
 }
 
+F_INLINE uint64_t str2i(void)
+{
+    char *t;
+    unsigned long long int v;
+
+    errno = 0;
+    v = strtoull(optarg, &t, 0);
+    if (t == optarg || *t != '\0' || ((v == 0 || v == UINT64_MAX) && errno == ERANGE)) {
+        return 500;
+    }
+    else {
+        return v;
+    }
+}
+
 int main(int argc, char **argv)
 {
     int c, idx;
@@ -519,7 +563,7 @@ int main(int argc, char **argv)
 
     if (argc < 2) {
         fprintf(stderr, "Needs a sub-command\n");
-        nb__main_help();
+        nb__help();
         return EXIT_FAILURE;
     }
     else {
@@ -530,23 +574,11 @@ int main(int argc, char **argv)
     is_stdout_tty = isatty(STDOUT_FILENO);
 
     if (strcasecmp(argv[1], "invoke") == 0) {
-        struct option opts_invoke[] = {
-            { "help",       no_argument,        NULL, 'h' },
-            { "no-args",    no_argument,        NULL, 'n' },
-            { "wait-reply", no_argument,        NULL, 'w' },
-            { "protocol",   required_argument,  NULL, 'P' },
-            { "peer",       required_argument,  NULL, 'p' },
-            { "method",     required_argument,  NULL, 'm' },
-            { "file",       required_argument,  NULL, 'i' },
-
-            { NULL,         0,                  NULL,  0  },
-        };
-
         proto = NBUS_PROTO_RAW;
-        while ((c = getopt_long(c_argc, c_argv, "hnwP:p:m:i:", opts_invoke, &idx)) != -1) {
+        while ((c = getopt_long(c_argc, c_argv, SOPT_INVOKE, opts_invoke, &idx)) != -1) {
             switch (c) {
                 case 'h':
-                    nb__invoke_help();
+                    nb__help();
                     return EXIT_SUCCESS;
 
                 case 'n':
@@ -569,6 +601,10 @@ int main(int argc, char **argv)
                     nb__accept_name(method, 0, 0);
                     break;
 
+                case 't':
+                    timeout = str2i();
+                    break;
+
                 case 'i':
                     if (f_in) fclose(f_in);
                     if ((f_in = fopen(optarg, "r")) == NULL) {
@@ -581,24 +617,22 @@ int main(int argc, char **argv)
             }
         }
         nb__load_args(f_in);
+        if (timeout) need_reply = 1;
         nb__invoke();
     }
     else if (strcasecmp(argv[1], "list") == 0) {
-        struct option opts_list[] = {
-            { "help",       no_argument,        NULL, 'h' },
-            { "verbose",    no_argument,        NULL, 'v' },
-
-            { NULL,         0,                  NULL,  0  },
-        };
-
-        while ((c = getopt_long(c_argc, c_argv, "hv", opts_list, &idx)) != -1) {
+        while ((c = getopt_long(c_argc, c_argv, SOPT_LIST, opts_list, &idx)) != -1) {
             switch (c) {
                 case 'h':
-                    nb__list_help();
+                    nb__help();
                     return EXIT_SUCCESS;
 
                 case 'v':
                     verbose = 1;
+                    break;
+
+                case 't':
+                    timeout = str2i();
                     break;
 
                 default:
@@ -606,22 +640,15 @@ int main(int argc, char **argv)
             }
         }
 
+        if (timeout == 0) timeout = 500; /* Force half a millisecond to prevent failures. */
         nb__list();
     }
     else if (strcasecmp(argv[1], "listen") == 0) {
-        struct option opts_listen[] = {
-            { "help",       no_argument,        NULL, 'h' },
-            { "event",      required_argument,  NULL, 'e' },
-            { "peer",       required_argument,  NULL, 'p' },
-            { "protocol",   required_argument,  NULL, 'P' },
-
-            { NULL,         0,                  NULL,  0  },
-        };
-
-        while ((c = getopt_long(c_argc, c_argv, "he:p:P:", opts_listen, &idx)) != -1) {
+        proto = NBUS_PROTO_ANY;
+        while ((c = getopt_long(c_argc, c_argv, SOPT_LISTEN, opts_listen, &idx)) != -1) {
             switch (c) {
                 case 'h':
-                    nb__listen_help();
+                    nb__help();
                     return EXIT_SUCCESS;
 
                 case 'e':
@@ -644,23 +671,14 @@ int main(int argc, char **argv)
         nb__listen();
     }
     else if (strcasecmp(argv[1], "raise") == 0) {
-        struct option opts_raise[] = {
-            { "help",       no_argument,        NULL, 'h' },
-            { "no-args",    no_argument,        NULL, 'n' },
-            { "protocol",   required_argument,  NULL, 'P' },
-            { "event",      required_argument,  NULL, 'e' },
-            { "file",       required_argument,  NULL, 'i' },
-
-            { NULL,         0,                  NULL,  0  },
-        };
-
         proto = NBUS_PROTO_RAW;
         peer = strdup("*");
 
-        while ((c = getopt_long(c_argc, c_argv, "hnP:e:i:", opts_raise, &idx)) != -1) {
+        no_arg = 0;
+        while ((c = getopt_long(c_argc, c_argv, SOPT_RAISE, opts_raise, &idx)) != -1) {
             switch (c) {
                 case 'h':
-                    nb__raise_help();
+                    nb__help();
                     return EXIT_SUCCESS;
 
                 case 'n':
@@ -692,17 +710,10 @@ int main(int argc, char **argv)
         nb__raise();
     }
     else {
-        struct option opts_main[] = {
-            { "help",       no_argument,        NULL, 'h' },
-            { "version",    no_argument,        NULL, 300 },
-
-            { NULL,         0,                  NULL,  0  },
-        };
-
-        while ((c = getopt_long(c_argc, c_argv, "hv", opts_main, &idx)) != -1) {
+        while ((c = getopt_long(argc, argv, SOPT_MAIN, opts_main, &idx)) != -1) {
             switch (c) {
                 case 'h':
-                    nb__main_help();
+                    nb__help();
                     return EXIT_SUCCESS;
 
                 case 300:

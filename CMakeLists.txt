@@ -8,11 +8,11 @@ endif()
 if (CMAKE_VERSION VERSION_LESS 3.0)
     project(nbus)
     set(PROJECT_VERSION_MAJOR "0")
-    set(PROJECT_VERSION_MINOR "0")
-    set(PROJECT_VERSION_PATCH "1")
+    set(PROJECT_VERSION_MINOR "1")
+    set(PROJECT_VERSION_PATCH "0")
     set(PROJECT_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}")
 else()
-    project(nbus LANGUAGES C VERSION 0.0.1)
+    project(nbus LANGUAGES C VERSION 0.1.0)
 endif()
 
 include(CheckIncludeFile)
@@ -29,7 +29,6 @@ set(CMAKE_SHARED_LIBRARY_LINK_C_FLAGS)
 if (NOT UNIX)
     message(FATAL_ERROR "Target platform must be UNIX for nBus to work.")
 endif()
-
 
 option(BUILD_AGENT          "Build network forwarding agent"    OFF) # Coming Soon...
 option(BUILD_CLI            "Also build CLI tool"               OFF)
@@ -105,6 +104,9 @@ if (NOT NBUS_CTX_NAME_PREFIX)
         set(NBUS_CTX_NAME_PREFIX "/var/run/nbus/")
     endif()
 endif()
+
+set(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} -L${CMAKE_STAGING_PREFIX}/lib -L${CMAKE_STAGING_PREFIX}/lib64")
+set(CMAKE_C_FLAGS           "${CMAKE_C_FLAGS} -isystem ${CMAKE_STAGING_PREFIX}/include")
 
 # According to POSIX, UNIX_PATH_MAX is removed and the sizeof (struct sockaddr_un.sun_path) is intentionally left
 # undefined. So we need to get the size of it in a portable way.

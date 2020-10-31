@@ -13,7 +13,6 @@
 #include "internal.h"
 
 #define NB__CTX_LEN                     nb__align_up(sizeof(nbus_context_t))
-#define nb__proto(flags)                ((uint8_t)(flags & 0x00000000000000fful))
 
 F_INLINE void nb__make_addr(struct sockaddr_un *addr, socklen_t *len, const char *name)
 {
@@ -90,7 +89,7 @@ static const nbus_cb_reg_t *nb__find_func(nbus_context_t *ctx, const char *name,
     const nbus_cb_reg_t *p;
 
     for (p = ctx->regs; p && p->flags != 0; p++) {
-        if ((p->flags & NBUS_KIND_METHOD) != 0 && nb__proto(p->flags) == nb__proto(flags)) {
+        if ((p->flags & NBUS_KIND_METHOD) != 0 && NB_PROTO_ID(p->flags) == NB_PROTO_ID(flags)) {
             if (strncmp(p->name, name, NBUS_NAME_LEN) == 0) {
                 return p;
             }
@@ -106,7 +105,7 @@ static const nbus_cb_reg_t *nb__find_event(nbus_context_t *ctx, const char *name
 
     /* Search for matching protocol first.. */
     for (p = ctx->regs; p && p->flags != 0; p++) {
-        if ((p->flags & NBUS_KIND_EVENT) != 0 && nb__proto(p->flags) == nb__proto(flags)) {
+        if ((p->flags & NBUS_KIND_EVENT) != 0 && NB_PROTO_ID(p->flags) == NB_PROTO_ID(flags)) {
             if (fnmatch(p->name, name, 0) == 0) {
                 return p;
             }
@@ -114,7 +113,7 @@ static const nbus_cb_reg_t *nb__find_event(nbus_context_t *ctx, const char *name
     }
     /* If that didn't work, search for any protocol. */
     for (p = ctx->regs; p && p->flags != 0; p++) {
-        if ((p->flags & NBUS_KIND_EVENT) != 0 && nb__proto(p->flags) == 0) {
+        if ((p->flags & NBUS_KIND_EVENT) != 0 && NB_PROTO_ID(p->flags) == 0) {
             if (fnmatch(p->name, name, 0) == 0) {
                 return p;
             }
@@ -511,7 +510,7 @@ int nbus_handle(nbus_context_t *ctx)
 
             ctx->egress.len = 0;
             if ((cb = nb__find_func(ctx, qry.name, qry.flags)) != NULL) {
-                res.err   = cb->cb(ctx, nb__proto(qry.flags), qry.id, qry.name, ctx->ingress.data, qry.len);
+                res.err   = cb->cb(ctx, NB_PROTO_ID(qry.flags), qry.id, qry.name, ctx->ingress.data, qry.len);
                 res.flags = NBUS_FLAG_CALL_OK;
                 res.len   = ctx->egress.len; /* Not the capacity. */
             }
@@ -535,7 +534,7 @@ int nbus_handle(nbus_context_t *ctx)
         }
         else if ((qry.flags & NBUS_KIND_EVENT) != 0) {
             if ((cb = nb__find_event(ctx, qry.name, qry.flags)) != NULL) {
-                cb->cb(ctx, nb__proto(qry.flags), qry.id, qry.name, ctx->ingress.data, qry.len);
+                cb->cb(ctx, NB_PROTO_ID(qry.flags), qry.id, qry.name, ctx->ingress.data, qry.len);
             }
         }
         else if ((qry.flags & NBUS_FLAG_META) != 0) {
